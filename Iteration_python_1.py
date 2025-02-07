@@ -2,7 +2,6 @@ import boto3
 import logging
 from botocore.exceptions import ClientError
 import json
-import base64
 
 logger = logging.getLogger(__name__)
 rekognition = boto3.client('rekognition')
@@ -10,20 +9,24 @@ rekognition = boto3.client('rekognition')
 def lambda_handler(event, context):
     try:
         # Parse EventBridge event
-        # EventBridge events have a 'detail' section where you can put custom parameters
         if 'detail' in event:
-            bucket_name = event['detail'].get('bucket')
-            object_key = event['detail'].get('object')
+            # Extract the actual string values from the nested dictionaries
+            bucket_detail = event['detail'].get('bucket', {})
+            object_detail = event['detail'].get('object', {})
+            
+            # Get the actual bucket name and object key
+            bucket_name = bucket_detail.get('name') if isinstance(bucket_detail, dict) else bucket_detail
+            object_key = object_detail.get('key') if isinstance(object_detail, dict) else object_detail
             
             if not bucket_name or not object_key:
-                raise ValueError('Missing bucket or object key in EventBridge event detail')
-                
-            # Process S3 image using bucket and key from EventBridge event
+                raise ValueError('Missing bucket name or object key in event detail')
+            
+            # Process S3 image using bucket and key
             response = rekognition.detect_labels(
                 Image={
                     'S3Object': {
-                        'Bucket': bucket_name,
-                        'Name': object_key
+                        'Bucket': str(bucket_name),  # Ensure string type
+                        'Name': str(object_key)      # Ensure string type
                     }
                 }
             )
@@ -42,7 +45,6 @@ def lambda_handler(event, context):
 
     except ClientError as client_err:
         error_message = "Couldn't analyze image: " + client_err.response['Error']['Message']
-        
         lambda_response = {
             'statusCode': 400,
             'body': {
@@ -50,7 +52,7 @@ def lambda_handler(event, context):
                 "ErrorMessage": error_message
             }
         }
-        logger.error("Error function %s: %s",
+        logger.error("Error in function %s: %s",
                     context.invoked_function_arn, error_message)
 
     except ValueError as val_error:
@@ -58,10 +60,10 @@ def lambda_handler(event, context):
             'statusCode': 400,
             'body': {
                 "Error": "ValueError",
-                "ErrorMessage": format(val_error)
+                "ErrorMessage": str(val_error)
             }
         }
-        logger.error("Error function %s: %s",
-                     context.invoked_function_arn, format(val_error))
+        logger.error("Error in function %s: %s",
+                     context.invoked_function_arn, str(val_error))
 
     return lambda_response
